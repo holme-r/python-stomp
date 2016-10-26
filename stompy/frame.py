@@ -1,5 +1,9 @@
+# Changes to _getline() to support a binary format STOMP message body containing embedded '\x00'
+# Copyright 2016 ARRIS Enterprises, LLC. 
+
 import socket
 import random
+import re
 from pprint import pformat
 from errno import EAGAIN, EWOULDBLOCK
 from Queue import Queue
@@ -200,7 +204,6 @@ class Frame(object):
         line = self._getline(nb=nb)
         if not line:
             return
-
         command = self.parse_command(line)
         line = line[len(command)+1:]
         headers_str, _, body = line.partition("\n\n")
@@ -253,6 +256,11 @@ class Frame(object):
             return self.get_reply()
 
     def _getline(self, nb=False):
+        # Copyright 2016 ARRIS Enterprises, LLC. 
+        # Modified this function to support a STOMP message body which is
+        # encoded in binary format and contains embedded '\x00'
+        # Also changed function so that it attempts to read more than one
+        # character at a time from the socket receive buffer. This is more efficient.
         """Get a single line from socket
 
         :keyword nb: Non-blocking: If this is set, and there are no
@@ -263,9 +271,11 @@ class Frame(object):
         try:
             buffer = ''
             partial = ''
-            while not buffer.endswith('\x00'):
+            frame_len = 0    # Set to a non-zero value if 'content-length:' is present in the headers
+            header_len = -1  # Set to a positive value once we have received all STOMP headers
+            while ((not buffer.endswith('\x00')) or (len(buffer) < frame_len)):
                 try:
-                    partial = self.sock.recv(1)
+                    partial = self.sock.recv(500)
                     if not partial or partial == '':
                         raise UnknownBrokerResponseError('empty reply')
                 except socket.error, exc:
@@ -274,6 +284,16 @@ class Frame(object):
                             raise UnknownBrokerResponseError('empty reply')
                         continue
                 buffer += partial
+
+                # Determine the total STOMP frame length if the STOMP header has been retrieved
+                if (header_len == -1):
+                    header_len = buffer.find("\n\n")
+                    if (header_len != -1) :
+                        headers = buffer[:header_len]
+                        search_obj = re.search(r'content-length:\s*(\d+)', headers)
+                        if search_obj:
+                            body_len = int(search_obj.group(1))
+                            frame_len = header_len + 2 + body_len + 1
         finally:
             self.sock.setblocking(nb)
 
