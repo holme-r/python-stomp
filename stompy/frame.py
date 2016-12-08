@@ -259,8 +259,6 @@ class Frame(object):
         # Copyright 2016 ARRIS Enterprises, LLC. 
         # Modified this function to support a STOMP message body which is
         # encoded in binary format and contains embedded '\x00'
-        # Also changed function so that it attempts to read more than one
-        # character at a time from the socket receive buffer. This is more efficient.
         """Get a single line from socket
 
         :keyword nb: Non-blocking: If this is set, and there are no
@@ -275,7 +273,7 @@ class Frame(object):
             header_len = -1  # Set to a positive value once we have received all STOMP headers
             while ((not buffer.endswith('\x00')) or (len(buffer) < frame_len)):
                 try:
-                    partial = self.sock.recv(500)
+                    partial = self.sock.recv(1)
                     if not partial or partial == '':
                         raise UnknownBrokerResponseError('empty reply')
                 except socket.error, exc:
